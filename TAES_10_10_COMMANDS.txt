@@ -1,0 +1,72 @@
+# TAES 10/10 - FINAL CONSOLIDATED BOOTSTRAP
+
+# 1. Clone your repository
+git clone https://github.com/TU_USUARIO/TAES.git
+cd TAES
+
+# 2. Backup current repository state
+git add .
+git commit -m "TAES previous baseline" || true
+
+# 3. Copy the files from this package into TAES.
+
+# 4. Static compilation check
+python -m compileall app
+
+# 5. Install dependencies
+pip install -r requirements.txt
+
+# 6. Local start
+uvicorn app.main:app --host 0.0.0.0 --port 10000
+
+# 7. Health
+curl http://localhost:10000/health
+
+# 8. Test restricted sandbox
+curl -X POST http://localhost:10000/sandbox/run   -H "Content-Type: application/json"   -d '{"action":"sandbox_test"}'
+
+# 9. Test agent
+curl -X POST http://localhost:10000/agent/run   -H "Content-Type: application/json"   -d '{"task":"Preparar un plan para investigar una API publica"}'
+
+# 10. Test capability registration
+curl -X POST http://localhost:10000/capabilities/discover   -H "Content-Type: application/json"   -d '{"name":"example_api","kind":"api","endpoint":"https://example.com","license":"mit","cost":"free"}'
+
+# 11. Test controlled HTTP
+curl -X POST http://localhost:10000/tools/http   -H "Content-Type: application/json"   -d '{"method":"GET","url":"https://example.com"}'
+
+# 12. Inspect jobs
+curl http://localhost:10000/jobs
+
+# 13. Inspect audit
+curl http://localhost:10000/audit
+
+# 14. Optional local full infrastructure
+docker compose up --build
+
+# 15. Verify
+curl http://localhost:10000/health
+
+# 16. Commit final version
+git add .
+git commit -m "TAES 10/10 sovereign agent v2.0"
+git branch -M main
+git push -u origin main
+
+# 17. Render
+# Create/Connect Web Service from the GitHub TAES repository.
+# Runtime: Docker
+# Branch: main
+# Health Check: /health
+# Auto Deploy: Yes
+#
+# Set these environment variables in Render:
+# DATABASE_URL=<managed PostgreSQL connection>
+# REDIS_URL=<managed Redis connection>
+# MODEL_BASE_URL=<your model runtime>
+# MODEL_NAME=<your model>
+# MODEL_API_KEY=<only when required>
+
+# IMPORTANT:
+# Do not put secrets in GitHub.
+# Do not expose Redis/PostgreSQL publicly.
+# Put authentication/rate limiting in the gateway.
