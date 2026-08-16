@@ -1,0 +1,99 @@
+import os
+import subprocess
+import shlex
+import httpx
+import re
+import logging
+from fastapi import FastAPI, HTTPException, Header
+from pydantic import BaseModel
+from dotenv import load_dotenv
+
+load_dotenv()
+
+OLLAMA_URL = os.getenv("OLLAMA_URL", "http://135.148.232.10:11434")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
+GROQ_URL = os.getenv("GROQ_URL", "https://api.groq.com/openai/v1/chat/completions")
+GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+MODEL_NAME = os.getenv("MODEL_NAME", "llama3.2:3b")
+SECRET_TOKEN = os.getenv("SECRET_TOKEN", "taes-secret-2026")
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("TAES")
+
+app = FastAPI(title="TAES API", version="1.0.0")
+
+class ChatRequest(BaseModel):
+    mensaje: str
+
+def tool_ejecutar(comando: str) -> str:
+    try:
+        result = subprocess.run(shlex.split(comando), capture_output=True, text=True, timeout=60)
+        salida = result.stdout
+        if result.stderr:
+            salida += "\n[stderr]: " + result.stderr
+        return salida if salida.strip() else "✅ Comando ejecutado sin salida."
+    except Exception as e:
+        return f"❌ Error: {str(e)}"
+
+async def tool_groq(prompt: str) -> str:
+    if not GROQ_API_KEY:
+        return "❌ GROQ_API_KEY no configurada."
+    headers = {"Content-Type": "application/json", "Authorization": f"Bearer {GROQ_API_KEY}"}
+    payload = {"model": GROQ_MODEL, "messages": [{"role": "user", "content": prompt}], "temperature": 0.7}
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(GROQ_URL, json=payload, headers=headers)
+            if response.status_code == 200:
+                return response.json()["choices"][0]["message"]["content"]
+            return f"Error: {response.status_code}"
+    except Exception as e:
+        return f"Error: {str(e)}"
+
+def procesar_herramienta(mensaje: str):
+    match = re.search(r'\[TOOL:(\w+)\s*(.*?)\]', mensaje, re.IGNORECASE)
+    if not match:
+        return None, None
+    return match.group(1).lower(), match.group(2).strip()
+
+@app.post("/chat")
+async def chat(request: ChatRequest, authorization: str = Header(None)):
+    if authorization != f"Bearer {SECRET_TOKEN}":
+        raise HTTPException(401, detail="No autorizado")
+    nombre, args = procesar_herramienta(request.mensaje)
+    tool_result = None
+    if nombre == "ejecutar":
+        tool_result = tool_ejecutar(args)
+    elif nombre in ("groq", "gpt"):
+        tool_result = await tool_groq(args)
+    elif nombre:
+        tool_result = f"❌ Herramienta '{nombre}' no reconocida."
+    system_prompt = (
+        "Eres TAES, el copiloto global y asistente personal de Liorvys. "
+        "Vives dentro del ecosistema ECO-IA. "
+        "Puedes ejecutar comandos con [TOOL:ejecutar comando]. "
+        "Siempre hablas en español, con claridad y estructura."
+    )
+    if tool_result is not None:
+        user_prompt = f"El usuario dijo: {request.mensaje}\n\nResultado:\n{tool_result}\n\nResponde."
+    else:
+        user_prompt = f"Pregunta: {request.mensaje}"
+    full_prompt = f"{system_prompt}\n\n{user_prompt}"
+    try:
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            response = await client.post(f"{OLLAMA_URL}/api/generate", json={
+                "model": MODEL_NAME, "prompt": full_prompt, "stream": False,
+                "options": {"temperature": 0.7, "num_predict": 512}
+            })
+            response.raise_for_status()
+            return {"respuesta": response.json().get("response", "TAES no generó respuesta.")}
+    except Exception as e:
+        logger.error(f"Error: {e}")
+        return {"error": str(e)}
+
+@app.get("/")
+async def root():
+    return {"message": "TAES - El Copiloto Global"}
+
+@app.get("/health")
+async def health():
+    return {"status": "TAES vivo", "modelo": MODEL_NAME}
